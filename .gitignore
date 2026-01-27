@@ -1,0 +1,35 @@
+# --- Python & OS Junk ---
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+Thumbs.db
+*.log
+
+# --- Virtual Envionments ---
+.venv/
+
+# --- IDE Settings --- 
+.vscode/
+.idea/
+
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# --- Data & Large files ---
+data/
+output/
+*.nc
+*.tif
+*.tiff
+*.csv
+*.xlsx
+*.zip
+
+# --- Documentation ---
+# เก็บเฉพาะ folder ที่จำเป็น
+!references/
+inspect_project_structure.py
+folders_detail.txt
+project_structure.txt
