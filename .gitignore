@@ -29,7 +29,7 @@ output/
 
 # --- Documentation ---
 # เก็บเฉพาะ folder ที่จำเป็น
-!references/
+references/
 inspect_project_structure.py
 folders_detail.txt
 project_structure.txt
