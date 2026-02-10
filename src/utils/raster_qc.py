@@ -8,6 +8,7 @@ from typing import Dict, Iterable, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import rasterio
+import math
 
 
 @dataclass(frozen=True)
@@ -501,109 +502,179 @@ def scan_raster_metas(
         df = df.sort_values(["month_key"]).reset_index(drop=True)
     return df
 
+def check_value_diff(actual, expected, tol=1e-5):
+    """
+    Hepler function ตัดสินว่าค่าต่างกันหรือไม่ (Return True ถ้าต่างกัน)
+    รองรับทั้ง Tuple, Float, Int, String    
+
+    Args:
+        actual (_type_): _description_
+        expected (_type_): _description_
+        tol (_type_, optional): _description_. Defaults to 1e-5.
+    """
+    # เช็คว่าเป็น None หรือไม่ ถ้าเป็นทั้งคู่ถือว่าไม่ต่างกัน
+    if pd.isna(actual) and pd.isna(expected):
+        return False
+    
+    # กรณี Tuple (เช่น transform, bounds)
+    if isinstance(actual, tuple) and isinstance(expected, tuple):
+        if len(actual) != len(expected):
+            return True
+        
+        # เช็ค elements แต่ละคู่ของ transform, bounds 
+        return any(
+            not math.isclose(a, e, rel_tol=tol)
+            if (isinstance(a, (float, int)) and isinstance(e, (float, int))) # <--- เช็คคู่เลย
+            else a != e
+            for a, e in zip(actual, expected)
+            )
+    # เช็คกรณีตัวเลขเดี่ยว ๆ ทั่วไป ที่ไม่ใช่พวกตัวเลขใน tuple
+    if isinstance(actual, (float, int)) and isinstance(expected, (float, int)):
+        return not math.isclose(actual, expected, rel_tol=tol)
+    
+    # กรณีค่าทั่วไป เช่น string, etc.
+    return actual != expected
 
 def find_inconsistencies(
-    df_meta: pd.DataFrame,
+    df_meta, 
     fields: Optional[List[str]] = None,
-    baseline_month: Optional[str] = None,
-) -> pd.DataFrame:
-    """
-    Identify metadata inconsistencies across monthly raster files.
-    
-    Compares specified metadata fields across all files against a baseline
-    to detect changes that could break pixel-aligned time-series analysis.
-    
-    Parameters
-    ----------
-    df_meta : pd.DataFrame
-        Metadata DataFrame from `scan_raster_metas()`.
-        
-    fields : Optional[List[str]], optional
-        List of metadata fields to check for consistency.
-        If None, checks all critical fields:
-        ['crs', 'width', 'height', 'count', 'dtype', 'nodata',
-         'transform', 'bounds', 'res']
-         
-    baseline_month : Optional[str], optional
-        Month key (YYYYMM) to use as reference. If None, uses the first
-        month in df_meta.
-    
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame documenting inconsistencies with columns:
-        ['month_key', 'field', 'expected', 'actual', 'filename', 'path']
-        
-        Each row represents one field that differs from the baseline.
-    
-    Notes
-    -----
-    Critical checks for time-series analysis:
-    1. CRS mismatch → can't overlay rasters
-    2. Resolution/dimensions mismatch → grid misalignment
-    3. Transform/bounds mismatch → spatial misregistration
-    4. Data type mismatch → analysis errors
-    
-    Examples
-    --------
-    >>> df_meta = scan_raster_metas(chosen_files)
-    >>> 
-    >>> # Find all inconsistencies
-    >>> incons = find_inconsistencies(df_meta)
-    >>> 
-    >>> # Check for specific issues
-    >>> crs_issues = incons[incons['field'] == 'crs']
-    >>> if not crs_issues.empty:
-    ...     print("WARNING: CRS inconsistencies found!")
-    ...     print(crs_issues[['month_key', 'expected', 'actual']])
-    >>> 
-    >>> # Use specific baseline
-    >>> incons = find_inconsistencies(df_meta, baseline_month="202301")
-    """
-    # ถ้าไม่มีข้อมูล → return DataFrame ว่าง
+    baseline_month: Optional[str] = None,) -> pd.DataFrame:
+                         
     if df_meta.empty:
         return pd.DataFrame(columns=["month_key", "field", "expected", "actual", "filename", "path"])
-
-    # กำหนด field ที่จะตรวจสอบ
-    if fields is None:
-        fields = [
-            "crs",
-            "width",
-            "height",
-            "count",
-            "dtype",
-            "nodata",
-            "transform",
-            "bounds",
-            "res",
-        ]
-    # เลือก baseline row ถ้า user ไม่ระบุตัว baseline จะใช้บรรทัดแรกของ df_meta เป็นตัวเทียบ
+    
+    if fields in None:
+        fields = ["crs", "width", "height", "count", "dtype", "nodata", "transform", "bounds", "res"]
+    
+    # หา Baseline เอาไว้ใช้เทียบไฟล์อื่น ๆ 
     if baseline_month is not None and (df_meta["month_key"] == baseline_month).any():
-        base = df_meta.loc[df_meta["month_key"] == baseline_month].iloc[0]
+        base_row = df_meta.loc[df_meta["month_key"] == baseline_month].iloc[0]
     else:
-        base = df_meta.iloc[0]
-        
-    # สร้าง dictionary ของค่า baseline
-    expected = {f: base[f] for f in fields}
-
-    # เปรียบเทียบทุกเดือน
+        base_row = df_meta.iloc[0]
+    
+    expected = {f: base_row[f] for f in fields}
+    
     rows = []
-    for _, r in df_meta.iterrows():
+    
+    for row in df_meta.itertuples(index=False)
         for f in fields:
-            if pd.isna(r[f]) and pd.isna(expected[f]):
-                continue
-            if r[f] != expected[f]:
-                rows.append(
-                    {
-                        "month_key": r["month_key"],
-                        "field": f,
-                        "expected": expected[f],
-                        "actual": r[f],
-                        "filename": r.get("filename", ""),
-                        "path": r.get("path", ""),
-                    }
-                )
+            act_val = getattr(row, f)
+            exp_val = expected[f]
+            
+            if check_value_diff(act_val, exp_val):
+                rows.append({
+                    "month_key": row.month_key,
+                    "field": f,
+                    "expected": exp_val,
+                    "actual": act_val,
+                    "filename": getattr(row, "filename", ""),
+                    "path": getattr(row, "path", ""),
+                })
+    
     return pd.DataFrame(rows)
+    
+# def find_inconsistencies(
+#     df_meta: pd.DataFrame,
+#     fields: Optional[List[str]] = None,
+#     baseline_month: Optional[str] = None,
+# ) -> pd.DataFrame:
+#     """
+#     Identify metadata inconsistencies across monthly raster files.
+    
+#     Compares specified metadata fields across all files against a baseline
+#     to detect changes that could break pixel-aligned time-series analysis.
+    
+#     Parameters
+#     ----------
+#     df_meta : pd.DataFrame
+#         Metadata DataFrame from `scan_raster_metas()`.
+        
+#     fields : Optional[List[str]], optional
+#         List of metadata fields to check for consistency.
+#         If None, checks all critical fields:
+#         ['crs', 'width', 'height', 'count', 'dtype', 'nodata',
+#          'transform', 'bounds', 'res']
+         
+#     baseline_month : Optional[str], optional
+#         Month key (YYYYMM) to use as reference. If None, uses the first
+#         month in df_meta.
+    
+#     Returns
+#     -------
+#     pd.DataFrame
+#         DataFrame documenting inconsistencies with columns:
+#         ['month_key', 'field', 'expected', 'actual', 'filename', 'path']
+        
+#         Each row represents one field that differs from the baseline.
+    
+#     Notes
+#     -----
+#     Critical checks for time-series analysis:
+#     1. CRS mismatch → can't overlay rasters
+#     2. Resolution/dimensions mismatch → grid misalignment
+#     3. Transform/bounds mismatch → spatial misregistration
+#     4. Data type mismatch → analysis errors
+    
+#     Examples
+#     --------
+#     >>> df_meta = scan_raster_metas(chosen_files)
+#     >>> 
+#     >>> # Find all inconsistencies
+#     >>> incons = find_inconsistencies(df_meta)
+#     >>> 
+#     >>> # Check for specific issues
+#     >>> crs_issues = incons[incons['field'] == 'crs']
+#     >>> if not crs_issues.empty:
+#     ...     print("WARNING: CRS inconsistencies found!")
+#     ...     print(crs_issues[['month_key', 'expected', 'actual']])
+#     >>> 
+#     >>> # Use specific baseline
+#     >>> incons = find_inconsistencies(df_meta, baseline_month="202301")
+#     """
+#     # ถ้าไม่มีข้อมูล → return DataFrame ว่าง
+#     if df_meta.empty:
+#         return pd.DataFrame(columns=["month_key", "field", "expected", "actual", "filename", "path"])
+
+#     # กำหนด field ที่จะตรวจสอบ
+#     if fields is None:
+#         fields = [
+#             "crs",
+#             "width",
+#             "height",
+#             "count",
+#             "dtype",
+#             "nodata",
+#             "transform",
+#             "bounds",
+#             "res",
+#         ]
+#     # เลือก baseline row ถ้า user ไม่ระบุตัว baseline จะใช้บรรทัดแรกของ df_meta เป็นตัวเทียบ
+#     if baseline_month is not None and (df_meta["month_key"] == baseline_month).any():
+#         base = df_meta.loc[df_meta["month_key"] == baseline_month].iloc[0]
+#     else:
+#         base = df_meta.iloc[0]
+        
+#     # สร้าง dictionary ของค่า baseline
+#     expected = {f: base[f] for f in fields}
+
+#     # เปรียบเทียบทุกเดือน
+#     rows = []
+#     for _, r in df_meta.iterrows():
+#         for f in fields:
+#             if pd.isna(r[f]) and pd.isna(expected[f]):
+#                 continue
+#             if r[f] != expected[f]:
+#                 rows.append(
+#                     {
+#                         "month_key": r["month_key"],
+#                         "field": f,
+#                         "expected": expected[f],
+#                         "actual": r[f],
+#                         "filename": r.get("filename", ""),
+#                         "path": r.get("path", ""),
+#                     }
+#                 )
+#     return pd.DataFrame(rows)
 
 
 def compute_month_coverage(
