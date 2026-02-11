@@ -695,7 +695,7 @@ def quick_stats(
         - 'pct_nodata_or_nan': Percentage of all pixels that are nodata or NaN
         - 'min': Minimum valid value (exclude nodata/NaN)
         - 'max': Maximum valid value (exclude nodata/NaN)
-        - 'n_total': Total number of pixels
+        - 'n_pixels': Total number of pixels
     
     Notes
     -----
@@ -728,7 +728,7 @@ def quick_stats(
         is_float = np.issubdtype(np.dtype(dtype), np.floating)
 
         # ตั้งค่า counters
-        n_total = 0     # นับพิกเซลทั้งหมด
+        n_pixels = 0     # นับพิกเซลทั้งหมด
         n_bad = 0       # นับพิกเซลที่ invalid (nodata หรือ NaN)
         n_zero = 0      # นับพิกเซลที่เป็นศูนย์ (หรือใกล้ศูนย์)
         vmin = None     # เก็บค่าต่ำสุดของ valid pixels
